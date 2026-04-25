@@ -11,3 +11,6 @@ register_transaction_tools(mcp)
 # from mcp_server.tools.scenarios import register_scenario_tools
 # from mcp_server.tools.health_score import register_health_score_tools
 # from mcp_server.tools.goals import register_goal_tools
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")

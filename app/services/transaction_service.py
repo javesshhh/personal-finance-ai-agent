@@ -131,10 +131,10 @@ async def get_spending_by_category(
         .where(
             Transaction.date >= start_date,
             Transaction.date <= end_date,
-            Transaction.amount < 0,
+            Transaction.category != TransactionCategory.SAVINGS,
         )
         .group_by(Transaction.category)
-        .order_by(func.sum(Transaction.amount))
+        .order_by(func.sum(Transaction.amount).desc())
     )
     return [
         SpendingByCategory(category=row.category, total=abs(row.total), count=row.count)
@@ -168,7 +168,7 @@ async def compare_months(
             .where(
                 extract("year", Transaction.date) == year,
                 extract("month", Transaction.date) == month,
-                Transaction.amount < 0,
+                Transaction.category != TransactionCategory.SAVINGS,
             )
             .group_by(Transaction.category)
         )
