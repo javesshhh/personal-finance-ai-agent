@@ -20,10 +20,13 @@ def create_app() -> FastAPI:
     )
 
     from api.health import router as health_router
+    from api.transactions import router as transactions_router
+
     app.include_router(health_router)
+    app.include_router(transactions_router, prefix="/api/v1")
 
     # Routers added here as each phase completes:
-    # from api.transactions import router as transactions_router
-    # app.include_router(transactions_router, prefix="/api/v1")
+    # from api.subscriptions import router as subscriptions_router
+    # app.include_router(subscriptions_router, prefix="/api/v1")
 
     return app
