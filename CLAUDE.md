@@ -174,6 +174,7 @@ API_PORT=8000
 | 08 | MCP Server Wiring | ⬜ Not started |
 | 09 | Testing & Code Quality | ⬜ Not started |
 | 10 | Deployment (Railway) | ⬜ Not started |
+| 11 | Multi-User Support | ⬜ Not started |
 
 **IMPORTANT for any Claude Code session:** Before writing any code, check which phase is current by reading the phase status above and the corresponding phase doc in `docs/phases/`. Do not implement anything outside the current phase scope.
 

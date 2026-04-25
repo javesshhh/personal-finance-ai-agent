@@ -8,9 +8,9 @@ Personal implementation roadmap. Tick off as you go.
 
 | Phase | Title | Status | Est. Days |
 |-------|-------|--------|-----------|
-| [01](docs/phases/01-environment-setup.md) | Environment & Project Setup | ⬜ Not started | 0.5 |
-| [02](docs/phases/02-core-infrastructure.md) | Core Infrastructure | ⬜ Not started | 1 |
-| [03](docs/phases/03-transactions.md) | Transaction Management | ⬜ Not started | 2 |
+| [01](docs/phases/01-environment-setup.md) | Environment & Project Setup | ✅ Done | 0.5 |
+| [02](docs/phases/02-core-infrastructure.md) | Core Infrastructure | ✅ Done | 1 |
+| [03](docs/phases/03-transactions.md) | Transaction Management | ✅ Done | 2 |
 | [04](docs/phases/04-subscriptions.md) | Subscription Intelligence | ⬜ Not started | 1.5 |
 | [05](docs/phases/05-scenario-engine.md) | What-If Scenario Engine | ⬜ Not started | 1 |
 | [06](docs/phases/06-health-score.md) | Financial Health Score | ⬜ Not started | 1.5 |
@@ -18,13 +18,14 @@ Personal implementation roadmap. Tick off as you go.
 | [08](docs/phases/08-mcp-server.md) | MCP Server Wiring | ⬜ Not started | 1 |
 | [09](docs/phases/09-testing-and-quality.md) | Testing & Code Quality | ⬜ Not started | 1 |
 | [10](docs/phases/10-deployment.md) | Deployment | ⬜ Not started | 1 |
+| [11](docs/phases/11-multi-user.md) | Multi-User Support | ⬜ Not started | 2 |
 
 **Update the status column as you work:**
 - `⬜ Not started`
 - `🔄 In progress`
 - `✅ Done`
 
-**Total estimated build time: ~12 days** (solo developer, part-time evenings)
+**Total estimated build time: ~14 days** (solo developer, part-time evenings)
 
 ---
 
@@ -217,3 +218,4 @@ personal-finance-ai-agent/
 - [Phase 08: MCP Server](docs/phases/08-mcp-server.md)
 - [Phase 09: Testing & CI](docs/phases/09-testing-and-quality.md)
 - [Phase 10: Deployment](docs/phases/10-deployment.md)
+- [Phase 11: Multi-User Support](docs/phases/11-multi-user.md)
