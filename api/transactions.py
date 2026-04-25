@@ -3,7 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.transaction import MonthComparison, SpendingByCategory, TransactionCreate, TransactionRead
+from app.schemas.transaction import CSVImportResult, MonthComparison, SpendingByCategory, TransactionCreate, TransactionRead
 from app.services import transaction_service
 from core.database import get_db
 
@@ -19,19 +19,18 @@ async def create_transaction(
     return TransactionRead.model_validate(transaction)
 
 
-@router.post("/import-csv", response_model=list[TransactionRead], status_code=status.HTTP_201_CREATED)
+@router.post("/import-csv", response_model=CSVImportResult, status_code=status.HTTP_201_CREATED)
 async def import_csv(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-) -> list[TransactionRead]:
+) -> CSVImportResult:
     if not file.filename or not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Uploaded file must have a .csv extension")
     content = await file.read()
     try:
-        transactions = await transaction_service.import_csv(db, content)
+        return await transaction_service.import_csv(db, content)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return [TransactionRead.model_validate(t) for t in transactions]
 
 
 @router.get("/spending", response_model=list[SpendingByCategory])

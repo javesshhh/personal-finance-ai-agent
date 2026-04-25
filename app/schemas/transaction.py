@@ -32,6 +32,12 @@ class TransactionRead(BaseModel):
     notes: str | None
 
 
+class CSVImportResult(BaseModel):
+    imported: int
+    skipped_duplicates: int
+    transactions: list["TransactionRead"]
+
+
 class SpendingByCategory(BaseModel):
     category: TransactionCategory
     total: Decimal

@@ -2,7 +2,7 @@ import enum
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, Enum, Numeric, String, Text
+from sqlalchemy import Date, Enum, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
@@ -40,3 +40,7 @@ class Transaction(Base):
         Enum(TransactionCategory), nullable=False, default=TransactionCategory.OTHER
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("date", "description", "amount", name="uq_transaction_date_description_amount"),
+    )

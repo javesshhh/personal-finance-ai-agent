@@ -7,7 +7,7 @@ from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction, TransactionCategory
-from app.schemas.transaction import MonthComparison, SpendingByCategory, TransactionCreate
+from app.schemas.transaction import CSVImportResult, MonthComparison, SpendingByCategory, TransactionCreate
 from app.services.categorizer import categorize_transactions
 
 
@@ -28,8 +28,11 @@ async def create_transaction(db: AsyncSession, data: TransactionCreate) -> Trans
     return transaction
 
 
-async def import_csv(db: AsyncSession, csv_content: bytes) -> list[Transaction]:
-    """Parse a bank CSV export, AI-categorize all rows, and persist them.
+async def import_csv(db: AsyncSession, csv_content: bytes) -> CSVImportResult:
+    """Parse a bank CSV export, skip duplicates, AI-categorize new rows, and persist them.
+
+    Duplicate detection is based on (date, description, amount) — safe to re-upload
+    the same CSV without creating double entries.
 
     Expected CSV columns (case-insensitive): date, description, amount.
     Date must be ISO format (YYYY-MM-DD).
@@ -39,7 +42,7 @@ async def import_csv(db: AsyncSession, csv_content: bytes) -> list[Transaction]:
         csv_content: Raw CSV file bytes.
 
     Returns:
-        List of persisted Transaction ORM instances.
+        CSVImportResult with imported count, skipped count, and transaction list.
 
     Raises:
         ValueError: If CSV is missing required columns or contains unparseable amounts.
@@ -48,7 +51,7 @@ async def import_csv(db: AsyncSession, csv_content: bytes) -> list[Transaction]:
     rows = list(reader)
 
     if not rows:
-        return []
+        return CSVImportResult(imported=0, skipped_duplicates=0, transactions=[])
 
     normalized = [{k.lower().strip(): v.strip() for k, v in row.items()} for row in rows]
     required = {"date", "description", "amount"}
@@ -56,19 +59,42 @@ async def import_csv(db: AsyncSession, csv_content: bytes) -> list[Transaction]:
     if missing:
         raise ValueError(f"CSV is missing required columns: {missing}. Got: {set(normalized[0].keys())}")
 
-    descriptions = [row["description"] for row in normalized]
-    categories = await categorize_transactions(descriptions)
-
-    transactions: list[Transaction] = []
-    for row, category in zip(normalized, categories):
+    # Parse amounts first so we can check for duplicates before calling Claude
+    parsed: list[tuple[date, str, Decimal]] = []
+    for row in normalized:
         try:
             amount = Decimal(row["amount"].replace(",", ""))
         except InvalidOperation as exc:
             raise ValueError(f"Invalid amount '{row['amount']}' in row: {row}") from exc
+        parsed.append((date.fromisoformat(row["date"]), row["description"], amount))
 
+    # Filter out rows that already exist in the DB (same date + description + amount)
+    new_rows: list[tuple[date, str, Decimal]] = []
+    for txn_date, description, amount in parsed:
+        existing = await db.execute(
+            select(Transaction.id).where(
+                Transaction.date == txn_date,
+                Transaction.description == description,
+                Transaction.amount == amount,
+            )
+        )
+        if existing.scalar_one_or_none() is None:
+            new_rows.append((txn_date, description, amount))
+
+    skipped = len(parsed) - len(new_rows)
+
+    if not new_rows:
+        return CSVImportResult(imported=0, skipped_duplicates=skipped, transactions=[])
+
+    # Only categorise the new rows — saves Claude API cost on re-uploads
+    descriptions = [desc for _, desc, _ in new_rows]
+    categories = await categorize_transactions(descriptions)
+
+    transactions: list[Transaction] = []
+    for (txn_date, description, amount), category in zip(new_rows, categories):
         transaction = Transaction(
-            date=date.fromisoformat(row["date"]),
-            description=row["description"],
+            date=txn_date,
+            description=description,
             amount=amount,
             category=category,
         )
@@ -78,7 +104,7 @@ async def import_csv(db: AsyncSession, csv_content: bytes) -> list[Transaction]:
     await db.commit()
     for t in transactions:
         await db.refresh(t)
-    return transactions
+    return CSVImportResult(imported=len(transactions), skipped_duplicates=skipped, transactions=transactions)
 
 
 async def get_spending_by_category(
