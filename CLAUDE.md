@@ -208,7 +208,7 @@ These features are fully live — do NOT re-implement them:
 
 ### Primary vs child sessions
 
-The session named in `FINSIGHT_SESSION` (currently `"sbi savings"`) is the **primary/default session** — the main salary or savings account. All MCP tools default to this session when no `session_name` is given. `import_file` now accepts an optional `session_name`; leaving it empty imports into the primary account.
+The session named in `FINSIGHT_SESSION` (currently `"primary"`) is the **primary/default session** — the main salary or savings account. All MCP tools default to this session when no `session_name` is given. `import_file` now accepts an optional `session_name`; leaving it empty imports into the primary account.
 
 Child sessions (e.g. `"hdfc credit card"`, `"icici bank"`) are secondary accounts imported with explicit names. The cross-session deduplication in `app/utils/cross_session.py` ensures that credit card bill payments in the primary session are excluded when aggregating across all sessions, so card transactions are never double-counted.
 
