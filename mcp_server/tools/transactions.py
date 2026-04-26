@@ -45,12 +45,18 @@ def register_transaction_tools(mcp: FastMCP) -> None:
         async with AsyncSessionLocal() as db:
             sessions = await session_service.list_sessions(db)
 
-        match = None
         name_lower = session_name.strip().lower()
-        for s in sessions:
-            if s.name.lower() == name_lower or name_lower in s.name.lower() or s.name.lower() in name_lower:
-                match = s
-                break
+
+        # Exact match first
+        match = next((s for s in sessions if s.name.lower() == name_lower), None)
+
+        if not match:
+            # Partial match — pick the closest by name length to avoid deleting wrong session
+            candidates = [s for s in sessions if name_lower in s.name.lower() or s.name.lower() in name_lower]
+            if len(candidates) > 1:
+                names = ", ".join(f"'{s.name}'" for s in candidates)
+                return f"Ambiguous — '{session_name}' matches multiple sessions: {names}. Please be more specific."
+            match = candidates[0] if candidates else None
 
         if not match:
             return f"No session found matching '{session_name}'."
