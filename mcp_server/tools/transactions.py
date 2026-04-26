@@ -89,16 +89,19 @@ def register_transaction_tools(mcp: FastMCP) -> None:
         return f"Could not delete session '{match.name}'."
 
     @mcp.tool()
-    async def import_file(file_path: str, session_name: str) -> str:
-        """Import a bank statement file (CSV or PDF) into a named session.
+    async def import_file(file_path: str, session_name: str = "") -> str:
+        """Import a bank statement file (CSV or PDF) into a session.
+
+        Leave session_name empty to import into the primary account (the default session
+        set by FINSIGHT_SESSION — typically your main savings/salary account).
+        Pass session_name for card or secondary accounts (e.g. "hdfc credit card").
 
         Creates the session automatically if it does not exist yet.
         Skips duplicate transactions so the same file can be safely re-imported.
 
         Args:
             file_path: Absolute path to the CSV or PDF file on the user's machine.
-            session_name: Name of the session to import into (e.g. "hdfc credit card").
-                          A new session is created if the name does not exist yet.
+            session_name: Session to import into. Leave empty for the primary account.
         """
         path = Path(file_path.strip())
         if not path.exists():

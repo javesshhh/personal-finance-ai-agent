@@ -206,6 +206,12 @@ These features are fully live — do NOT re-implement them:
 
 `transactions.session_id` is a required FK to `sessions.id`. Every transaction belongs to exactly one session. All service functions take `session_id: uuid.UUID` as a parameter — never query transactions without it.
 
+### Primary vs child sessions
+
+The session named in `FINSIGHT_SESSION` (currently `"sbi savings"`) is the **primary/default session** — the main salary or savings account. All MCP tools default to this session when no `session_name` is given. `import_file` now accepts an optional `session_name`; leaving it empty imports into the primary account.
+
+Child sessions (e.g. `"hdfc credit card"`, `"icici bank"`) are secondary accounts imported with explicit names. The cross-session deduplication in `app/utils/cross_session.py` ensures that credit card bill payments in the primary session are excluded when aggregating across all sessions, so card transactions are never double-counted.
+
 **IMPORTANT for any Claude Code session:** Before writing any code, check which phase is current by reading the phase status above and the corresponding phase doc in `docs/phases/`. Do not implement anything outside the current phase scope.
 
 ---
