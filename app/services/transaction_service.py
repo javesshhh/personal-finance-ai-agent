@@ -1,5 +1,6 @@
 import csv
 import io
+import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -11,34 +12,88 @@ from app.schemas.transaction import CSVImportResult, MonthComparison, SpendingBy
 from app.services.categorizer import categorize_transactions
 
 
-async def create_transaction(db: AsyncSession, data: TransactionCreate) -> Transaction:
+async def create_transaction(db: AsyncSession, session_id: uuid.UUID, data: TransactionCreate) -> Transaction:
     """Persist a single transaction to the database.
 
     Args:
         db: Async database session.
+        session_id: UUID of the owning session.
         data: Validated transaction data.
 
     Returns:
         The created Transaction ORM instance.
     """
-    transaction = Transaction(**data.model_dump())
+    transaction = Transaction(session_id=session_id, **data.model_dump())
     db.add(transaction)
     await db.commit()
     await db.refresh(transaction)
     return transaction
 
 
-async def import_csv(db: AsyncSession, csv_content: bytes) -> CSVImportResult:
-    """Parse a bank CSV export, skip duplicates, AI-categorize new rows, and persist them.
-
-    Duplicate detection is based on (date, description, amount) — safe to re-upload
-    the same CSV without creating double entries.
-
-    Expected CSV columns (case-insensitive): date, description, amount.
-    Date must be ISO format (YYYY-MM-DD).
+async def import_rows(
+    db: AsyncSession,
+    session_id: uuid.UUID,
+    rows: list[tuple[date, str, Decimal]],
+) -> CSVImportResult:
+    """Deduplicate, AI-categorize, and persist a list of parsed transaction rows.
 
     Args:
         db: Async database session.
+        session_id: UUID of the owning session.
+        rows: List of (date, description, amount) tuples already parsed from CSV or PDF.
+
+    Returns:
+        CSVImportResult with imported count, skipped count, and transaction list.
+    """
+    # Filter rows that already exist in this session
+    new_rows: list[tuple[date, str, Decimal]] = []
+    for txn_date, description, amount in rows:
+        existing = await db.execute(
+            select(Transaction.id).where(
+                Transaction.session_id == session_id,
+                Transaction.date == txn_date,
+                Transaction.description == description,
+                Transaction.amount == amount,
+            )
+        )
+        if existing.scalar_one_or_none() is None:
+            new_rows.append((txn_date, description, amount))
+
+    skipped = len(rows) - len(new_rows)
+
+    if not new_rows:
+        return CSVImportResult(imported=0, skipped_duplicates=skipped, transactions=[])
+
+    descriptions = [desc for _, desc, _ in new_rows]
+    categories = await categorize_transactions(descriptions)
+
+    transactions: list[Transaction] = []
+    for (txn_date, description, amount), category in zip(new_rows, categories):
+        transaction = Transaction(
+            session_id=session_id,
+            date=txn_date,
+            description=description,
+            amount=amount,
+            category=category,
+        )
+        db.add(transaction)
+        transactions.append(transaction)
+
+    await db.commit()
+    for t in transactions:
+        await db.refresh(t)
+    return CSVImportResult(imported=len(transactions), skipped_duplicates=skipped, transactions=transactions)
+
+
+async def import_csv(db: AsyncSession, session_id: uuid.UUID, csv_content: bytes) -> CSVImportResult:
+    """Parse a bank CSV export and import rows into the given session.
+
+    Expected CSV columns (case-insensitive): date, description, amount.
+    Date must be ISO format (YYYY-MM-DD). Duplicate rows are skipped.
+
+    Args:
+        db: Async database session.
+        session_id: UUID of the owning session.
         csv_content: Raw CSV file bytes.
 
     Returns:
@@ -59,7 +114,6 @@ async def import_csv(db: AsyncSession, csv_content: bytes) -> CSVImportResult:
     if missing:
         raise ValueError(f"CSV is missing required columns: {missing}. Got: {set(normalized[0].keys())}")
 
-    # Parse amounts first so we can check for duplicates before calling Claude
     parsed: list[tuple[date, str, Decimal]] = []
     for row in normalized:
         try:
@@ -68,54 +122,20 @@ async def import_csv(db: AsyncSession, csv_content: bytes) -> CSVImportResult:
             raise ValueError(f"Invalid amount '{row['amount']}' in row: {row}") from exc
         parsed.append((date.fromisoformat(row["date"]), row["description"], amount))
 
-    # Filter out rows that already exist in the DB (same date + description + amount)
-    new_rows: list[tuple[date, str, Decimal]] = []
-    for txn_date, description, amount in parsed:
-        existing = await db.execute(
-            select(Transaction.id).where(
-                Transaction.date == txn_date,
-                Transaction.description == description,
-                Transaction.amount == amount,
-            )
-        )
-        if existing.scalar_one_or_none() is None:
-            new_rows.append((txn_date, description, amount))
-
-    skipped = len(parsed) - len(new_rows)
-
-    if not new_rows:
-        return CSVImportResult(imported=0, skipped_duplicates=skipped, transactions=[])
-
-    # Only categorise the new rows — saves Claude API cost on re-uploads
-    descriptions = [desc for _, desc, _ in new_rows]
-    categories = await categorize_transactions(descriptions)
-
-    transactions: list[Transaction] = []
-    for (txn_date, description, amount), category in zip(new_rows, categories):
-        transaction = Transaction(
-            date=txn_date,
-            description=description,
-            amount=amount,
-            category=category,
-        )
-        db.add(transaction)
-        transactions.append(transaction)
-
-    await db.commit()
-    for t in transactions:
-        await db.refresh(t)
-    return CSVImportResult(imported=len(transactions), skipped_duplicates=skipped, transactions=transactions)
+    return await import_rows(db, session_id, parsed)
 
 
 async def get_spending_by_category(
     db: AsyncSession,
+    session_id: uuid.UUID,
     start_date: date,
     end_date: date,
 ) -> list[SpendingByCategory]:
-    """Aggregate spending (negative amounts) by category within a date range.
+    """Aggregate spending by category within a date range for a session.
 
     Args:
         db: Async database session.
+        session_id: UUID of the session to query.
         start_date: Inclusive start date.
         end_date: Inclusive end date.
 
@@ -129,6 +149,7 @@ async def get_spending_by_category(
             func.count(Transaction.id).label("count"),
         )
         .where(
+            Transaction.session_id == session_id,
             Transaction.date >= start_date,
             Transaction.date <= end_date,
             Transaction.category != TransactionCategory.SAVINGS,
@@ -144,15 +165,17 @@ async def get_spending_by_category(
 
 async def compare_months(
     db: AsyncSession,
+    session_id: uuid.UUID,
     year_a: int,
     month_a: int,
     year_b: int,
     month_b: int,
 ) -> list[MonthComparison]:
-    """Compare spending by category between two calendar months.
+    """Compare spending by category between two calendar months for a session.
 
     Args:
         db: Async database session.
+        session_id: UUID of the session to query.
         year_a: Year of the first month.
         month_a: Month number (1-12) of the first month.
         year_b: Year of the second month.
@@ -166,6 +189,7 @@ async def compare_months(
         result = await db.execute(
             select(Transaction.category, func.sum(Transaction.amount).label("total"))
             .where(
+                Transaction.session_id == session_id,
                 extract("year", Transaction.date) == year,
                 extract("month", Transaction.date) == month,
                 Transaction.category != TransactionCategory.SAVINGS,

@@ -1,6 +1,5 @@
 # Import all models here so Alembic can detect them for autogenerate.
-# Uncomment each line as the corresponding phase is completed.
-
+from app.models.session import Session  # noqa: F401  # Phase 03+
 from app.models.transaction import Transaction  # noqa: F401  # Phase 03
 
 # from app.models.subscription import Subscription    # Phase 04

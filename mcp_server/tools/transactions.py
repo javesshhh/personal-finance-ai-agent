@@ -1,3 +1,5 @@
+import uuid
+from collections.abc import Callable
 from datetime import date
 
 from mcp.server.fastmcp import FastMCP
@@ -6,7 +8,7 @@ from app.services import transaction_service
 from core.database import AsyncSessionLocal
 
 
-def register_transaction_tools(mcp: FastMCP) -> None:
+def register_transaction_tools(mcp: FastMCP, get_session_id: Callable[[], uuid.UUID]) -> None:
     @mcp.tool()
     async def get_spending(start_date: str, end_date: str) -> str:
         """Get spending totals by category between two dates.
@@ -18,6 +20,7 @@ def register_transaction_tools(mcp: FastMCP) -> None:
         async with AsyncSessionLocal() as db:
             results = await transaction_service.get_spending_by_category(
                 db,
+                get_session_id(),
                 date.fromisoformat(start_date),
                 date.fromisoformat(end_date),
             )
@@ -37,7 +40,7 @@ def register_transaction_tools(mcp: FastMCP) -> None:
             month_b: Month number of the second month (1-12).
         """
         async with AsyncSessionLocal() as db:
-            results = await transaction_service.compare_months(db, year_a, month_a, year_b, month_b)
+            results = await transaction_service.compare_months(db, get_session_id(), year_a, month_a, year_b, month_b)
         if not results:
             return "No data found for the requested months."
         lines = [

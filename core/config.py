@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     mcp_server_port: int = 8001
     api_port: int = 8000
     environment: str = "development"
+    finsight_session: str = "default"
 
     @property
     def is_production(self) -> bool:
