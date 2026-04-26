@@ -18,19 +18,20 @@ client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 async def run_scenario(
     db: AsyncSession,
-    session_id: uuid.UUID,
+    session_id: uuid.UUID | None,
     request: ScenarioRequest,
 ) -> ScenarioResult:
     """Run a what-if financial scenario using real spending data and Claude projections.
 
-    Computes the current monthly average spending baseline from the last 3 months
-    of transactions for the given session, applies the requested spending changes,
-    then asks Claude to project time to goal and write a motivating narrative.
+    Computes the current monthly average spending baseline from the last 3 months.
+    When session_id is None, aggregates spending across all sessions (total picture).
+    When session_id is provided, scopes the baseline to that session only.
+
     Falls back to deterministic projection when Claude API is unavailable.
 
     Args:
         db: Async database session.
-        session_id: UUID of the session to use for the spending baseline.
+        session_id: UUID of the session to use for the baseline, or None for all sessions.
         request: Scenario parameters — spending changes, target amount and description.
 
     Returns:

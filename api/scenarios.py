@@ -13,26 +13,30 @@ router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 @router.post("/run", response_model=ScenarioResult)
 async def run_scenario(
     request: ScenarioRequest,
-    session_id: uuid.UUID,
+    session_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> ScenarioResult:
-    """Run a what-if financial scenario for a session.
+    """Run a what-if financial scenario.
+
+    When session_id is omitted, the baseline uses spending aggregated across all sessions.
+    When session_id is provided, the baseline is scoped to that session only.
 
     Args:
         request: Scenario parameters — spending changes, target amount and description.
-        session_id: UUID of the session to use for the spending baseline.
+        session_id: Optional UUID to scope baseline to a specific session.
         db: Injected database session.
 
     Returns:
         ScenarioResult with months to goal, projected savings, narrative, and breakdown.
 
     Raises:
-        HTTPException 404: If the session is not found.
+        HTTPException 404: If the given session_id is not found.
         HTTPException 500: If scenario simulation fails unexpectedly.
     """
-    session = await session_service.get_session(db, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if session_id is not None:
+        session = await session_service.get_session(db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     try:
         return await scenario_service.run_scenario(db, session_id, request)

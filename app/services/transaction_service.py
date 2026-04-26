@@ -127,33 +127,36 @@ async def import_csv(db: AsyncSession, session_id: uuid.UUID, csv_content: bytes
 
 async def get_spending_by_category(
     db: AsyncSession,
-    session_id: uuid.UUID,
+    session_id: uuid.UUID | None,
     start_date: date,
     end_date: date,
 ) -> list[SpendingByCategory]:
-    """Aggregate spending by category within a date range for a session.
+    """Aggregate spending by category within a date range.
 
     Args:
         db: Async database session.
-        session_id: UUID of the session to query.
+        session_id: UUID of the session to query, or None to aggregate across all sessions.
         start_date: Inclusive start date.
         end_date: Inclusive end date.
 
     Returns:
         List of SpendingByCategory sorted by total spend descending.
     """
+    filters = [
+        Transaction.date >= start_date,
+        Transaction.date <= end_date,
+        Transaction.category != TransactionCategory.SAVINGS,
+    ]
+    if session_id is not None:
+        filters.append(Transaction.session_id == session_id)
+
     result = await db.execute(
         select(
             Transaction.category,
             func.sum(Transaction.amount).label("total"),
             func.count(Transaction.id).label("count"),
         )
-        .where(
-            Transaction.session_id == session_id,
-            Transaction.date >= start_date,
-            Transaction.date <= end_date,
-            Transaction.category != TransactionCategory.SAVINGS,
-        )
+        .where(*filters)
         .group_by(Transaction.category)
         .order_by(func.sum(Transaction.amount).desc())
     )
