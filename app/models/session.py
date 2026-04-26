@@ -16,3 +16,4 @@ class Session(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="session", cascade="all, delete-orphan")  # noqa: F821
+    subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="session", cascade="all, delete-orphan")  # noqa: F821
