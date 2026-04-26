@@ -1,5 +1,4 @@
 import uuid
-from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -7,28 +6,33 @@ from mcp.server.fastmcp import FastMCP
 
 from app.services import session_service, transaction_service
 from app.services.pdf_parser import parse_pdf
+from core.config import settings
 from core.database import AsyncSessionLocal
 
 
-def register_transaction_tools(mcp: FastMCP, get_session_id: Callable[[], uuid.UUID]) -> None:
+async def _resolve_session(session_name: str) -> uuid.UUID:
+    """Return the session_id for the given name.
 
-    async def _resolve_session(session_name: str) -> uuid.UUID:
-        """Return session_id for the given name, or the default if name is empty."""
-        if not session_name.strip():
-            return get_session_id()
-        async with AsyncSessionLocal() as db:
-            session = await session_service.get_or_create_by_name(db, session_name.strip())
-            return session.id
+    Falls back to FINSIGHT_SESSION env var when session_name is empty.
+    Creates the session automatically if it does not exist.
+    """
+    name = session_name.strip() if session_name.strip() else settings.finsight_session
+    async with AsyncSessionLocal() as db:
+        session = await session_service.get_or_create_by_name(db, name)
+        return session.id
+
+
+def register_transaction_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def list_sessions() -> str:
-        """List all available sessions. Call this before importing files or when the user
-        wants to know what data sources / accounts are available."""
+        """List all available sessions / accounts. Call this when the user wants to
+        know what data sources are loaded or before importing a new file."""
         async with AsyncSessionLocal() as db:
             sessions = await session_service.list_sessions(db)
         if not sessions:
             return "No sessions found. Use import_file to create one."
-        lines = [f"- {s.name} (id: {s.id})" for s in sessions]
+        lines = [f"- {s.name}" for s in sessions]
         return "Available sessions:\n" + "\n".join(lines)
 
     @mcp.tool()
@@ -41,7 +45,7 @@ def register_transaction_tools(mcp: FastMCP, get_session_id: Callable[[], uuid.U
         Args:
             file_path: Absolute path to the CSV or PDF file on the user's machine.
             session_name: Name of the session to import into (e.g. "hdfc credit card").
-                          A new session is created if the name doesn't exist yet.
+                          A new session is created if the name does not exist yet.
         """
         path = Path(file_path.strip())
         if not path.exists():
@@ -65,8 +69,9 @@ def register_transaction_tools(mcp: FastMCP, get_session_id: Callable[[], uuid.U
                 rows = [(r.date, r.description, r.amount) for r in parsed_rows]
                 result = await transaction_service.import_rows(db, sid, rows)
 
+        name = session_name.strip() or settings.finsight_session
         return (
-            f"Imported {result.imported} transactions into '{session_name}'. "
+            f"Imported {result.imported} transactions into '{name}'. "
             f"Skipped {result.skipped_duplicates} duplicates."
         )
 
@@ -83,12 +88,11 @@ def register_transaction_tools(mcp: FastMCP, get_session_id: Callable[[], uuid.U
         sid = await _resolve_session(session_name)
         async with AsyncSessionLocal() as db:
             results = await transaction_service.get_spending_by_category(
-                db,
-                sid,
+                db, sid,
                 date.fromisoformat(start_date),
                 date.fromisoformat(end_date),
             )
-        label = f" [{session_name}]" if session_name.strip() else ""
+        label = f" [{session_name.strip()}]" if session_name.strip() else ""
         if not results:
             return f"No spending data found{label} for that date range."
         lines = [f"{r.category.value}: ₹{r.total:,.2f} ({r.count} transactions)" for r in results]
@@ -111,7 +115,7 @@ def register_transaction_tools(mcp: FastMCP, get_session_id: Callable[[], uuid.U
         sid = await _resolve_session(session_name)
         async with AsyncSessionLocal() as db:
             results = await transaction_service.compare_months(db, sid, year_a, month_a, year_b, month_b)
-        label = f" [{session_name}]" if session_name.strip() else ""
+        label = f" [{session_name.strip()}]" if session_name.strip() else ""
         if not results:
             return f"No data found{label} for the requested months."
         lines = [
