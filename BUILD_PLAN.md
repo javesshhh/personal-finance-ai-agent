@@ -184,6 +184,7 @@ personal-finance-ai-agent/
 ## Key Docs
 
 - [Architecture Decisions](docs/architecture-decisions.md)
+- [Known Limitations](docs/LIMITATIONS.md)
 - [Phase 03: Transactions + Sessions + PDF](docs/phases/03-transactions.md)
 - [Phase 04: Subscriptions](docs/phases/04-subscriptions.md)
 - [Phase 05: Scenarios](docs/phases/05-scenario-engine.md)

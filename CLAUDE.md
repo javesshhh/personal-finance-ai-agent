@@ -160,6 +160,8 @@ API_PORT=8000
 
 **Architecture decisions:** [`docs/architecture-decisions.md`](docs/architecture-decisions.md) — why every major technical choice was made
 
+**Known limitations:** [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) — tracked gaps per phase, updated as we build
+
 ### Phase Status (update this as you complete phases)
 
 | Phase | Title | Status |
