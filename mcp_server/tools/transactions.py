@@ -36,6 +36,33 @@ def register_transaction_tools(mcp: FastMCP) -> None:
         return "Available sessions:\n" + "\n".join(lines)
 
     @mcp.tool()
+    async def delete_session(session_name: str) -> str:
+        """Delete a session and all its transactions permanently.
+
+        Args:
+            session_name: Name of the session to delete (e.g. "Business 2025").
+        """
+        async with AsyncSessionLocal() as db:
+            sessions = await session_service.list_sessions(db)
+
+        match = None
+        name_lower = session_name.strip().lower()
+        for s in sessions:
+            if s.name.lower() == name_lower or name_lower in s.name.lower() or s.name.lower() in name_lower:
+                match = s
+                break
+
+        if not match:
+            return f"No session found matching '{session_name}'."
+
+        async with AsyncSessionLocal() as db:
+            deleted = await session_service.delete_session(db, match.id)
+
+        if deleted:
+            return f"Session '{match.name}' and all its transactions have been deleted."
+        return f"Could not delete session '{match.name}'."
+
+    @mcp.tool()
     async def import_file(file_path: str, session_name: str) -> str:
         """Import a bank statement file (CSV or PDF) into a named session.
 
