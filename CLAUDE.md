@@ -167,8 +167,8 @@ API_PORT=8000
 | 01 | Environment & Project Setup | ✅ Done |
 | 02 | Core Infrastructure | ✅ Done |
 | 03 | Transaction Management + Sessions + PDF | ✅ Done |
-| 04 | Subscription Intelligence | ⬜ Not started |
-| 05 | What-If Scenario Engine | ⬜ Not started |
+| 04 | Subscription Intelligence | ✅ Done |
+| 05 | What-If Scenario Engine | ✅ Done |
 | 06 | Financial Health Score | ⬜ Not started |
 | 07 | Budget & Goal Tracking | ⬜ Not started |
 | 08 | MCP Server Wiring | ⬜ Not started |
@@ -176,15 +176,28 @@ API_PORT=8000
 | 10 | Deployment (Railway) | ⬜ Not started |
 | 11 | Multi-User Support | ⬜ Not started |
 
-### What is already shipped (beyond original Phase 03 scope)
+### What is already shipped
 
-These features were built and are fully live — do NOT re-implement them:
+These features are fully live — do NOT re-implement them:
 
-- **Sessions** — `sessions` table, `session_id` FK on all transaction rows, full CRUD API (`/api/v1/sessions/`). Each named session is an isolated data workspace (e.g. "hdfc credit card", "sbi savings").
+**Phase 03 (Transactions + Sessions + PDF):**
+- **Sessions** — `sessions` table, `session_id` FK on all owned tables, full CRUD API (`/api/v1/sessions/`). Each named session is an isolated data workspace (e.g. "hdfc credit card", "sbi savings"). Partial/case-insensitive name matching via `get_or_create_by_name`.
 - **PDF import** — `POST /api/v1/transactions/import-pdf?session_id=`. Three-strategy parser: pdfplumber tables → Claude API → regex fallback. Lives in `app/services/pdf_parser.py`.
-- **MCP tools (live):** `list_sessions`, `import_file(file_path, session_name)`, `get_spending(..., session_name="")`, `compare_months(..., session_name="")`. All tools resolve session from `FINSIGHT_SESSION` env var as default; `session_name` param overrides per-call.
+- **MCP tools:** `list_sessions`, `import_file(file_path, session_name)`, `delete_session(session_name)`, `get_spending(..., session_name="")`, `compare_months(..., session_name="")`. All tools resolve session from `FINSIGHT_SESSION` env var as default; `session_name` param overrides per-call.
 - **Keyword categorizer fallback** — `app/services/categorizer.py` falls back to keyword matching when Claude API has no credits.
 - **`FINSIGHT_SESSION` env var** — set in `.env` and `claude_desktop_config.json`. MCP server creates the named session if it doesn't exist.
+
+**Phase 04 (Subscription Intelligence):**
+- **`subscriptions` table** — session-scoped (`session_id` FK), stores name, pattern, latest/previous amount, frequency, waste score.
+- **Detection service** — `subscription_service.detect_subscriptions(db, session_id)` — keyword-based matching (2+ occurrences = recurring), Claude waste scoring with graceful fallback.
+- **API:** `POST /api/v1/subscriptions/detect?session_id=`, `GET /api/v1/subscriptions/?session_id=`, `GET /api/v1/subscriptions/price-changes?session_id=`.
+- **MCP tools:** `detect_subscriptions(session_name="")`, `audit_subscriptions(session_name="")`, `flag_price_changes(session_name="")`.
+
+**Phase 05 (What-If Scenario Engine):**
+- **Scenario service** — `scenario_service.run_scenario(db, session_id, request)` — uses last 3 months of real spending as baseline, applies spending cuts, projects months to goal via Claude narrative + deterministic fallback.
+- **API:** `POST /api/v1/scenarios/run?session_id=`.
+- **MCP tool:** `run_scenario(category, reduction_pct, target_description, target_amount, extra_monthly_savings=0, session_name="")`.
+- **Fallback** — `_deterministic_projection` runs when Claude API is unavailable.
 
 ### Key data model note
 
