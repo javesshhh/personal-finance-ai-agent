@@ -154,7 +154,7 @@ API_PORT=8000
 
 ## Build Plan & Current Status
 
-**Master build plan:** [`BUILD_PLAN.md`](BUILD_PLAN.md) — 10 phases, each with full checklists
+**Master build plan:** [`BUILD_PLAN.md`](BUILD_PLAN.md) — 11 phases, each with full checklists
 
 **Phase docs:** [`docs/phases/`](docs/phases/) — one file per phase with commands, pros/cons, verification steps
 
@@ -166,7 +166,7 @@ API_PORT=8000
 |-------|-------|--------|
 | 01 | Environment & Project Setup | ✅ Done |
 | 02 | Core Infrastructure | ✅ Done |
-| 03 | Transaction Management | ✅ Done |
+| 03 | Transaction Management + Sessions + PDF | ✅ Done |
 | 04 | Subscription Intelligence | ⬜ Not started |
 | 05 | What-If Scenario Engine | ⬜ Not started |
 | 06 | Financial Health Score | ⬜ Not started |
@@ -174,7 +174,21 @@ API_PORT=8000
 | 08 | MCP Server Wiring | ⬜ Not started |
 | 09 | Testing & Code Quality | ⬜ Not started |
 | 10 | Deployment (Railway) | ⬜ Not started |
-| 11 | Session-Based Identity & PDF Support | ⬜ Not started |
+| 11 | Multi-User Support | ⬜ Not started |
+
+### What is already shipped (beyond original Phase 03 scope)
+
+These features were built and are fully live — do NOT re-implement them:
+
+- **Sessions** — `sessions` table, `session_id` FK on all transaction rows, full CRUD API (`/api/v1/sessions/`). Each named session is an isolated data workspace (e.g. "hdfc credit card", "sbi savings").
+- **PDF import** — `POST /api/v1/transactions/import-pdf?session_id=`. Three-strategy parser: pdfplumber tables → Claude API → regex fallback. Lives in `app/services/pdf_parser.py`.
+- **MCP tools (live):** `list_sessions`, `import_file(file_path, session_name)`, `get_spending(..., session_name="")`, `compare_months(..., session_name="")`. All tools resolve session from `FINSIGHT_SESSION` env var as default; `session_name` param overrides per-call.
+- **Keyword categorizer fallback** — `app/services/categorizer.py` falls back to keyword matching when Claude API has no credits.
+- **`FINSIGHT_SESSION` env var** — set in `.env` and `claude_desktop_config.json`. MCP server creates the named session if it doesn't exist.
+
+### Key data model note
+
+`transactions.session_id` is a required FK to `sessions.id`. Every transaction belongs to exactly one session. All service functions take `session_id: uuid.UUID` as a parameter — never query transactions without it.
 
 **IMPORTANT for any Claude Code session:** Before writing any code, check which phase is current by reading the phase status above and the corresponding phase doc in `docs/phases/`. Do not implement anything outside the current phase scope.
 

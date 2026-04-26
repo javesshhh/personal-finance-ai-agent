@@ -10,7 +10,7 @@ Personal implementation roadmap. Tick off as you go.
 |-------|-------|--------|-----------|
 | [01](docs/phases/01-environment-setup.md) | Environment & Project Setup | ✅ Done | 0.5 |
 | [02](docs/phases/02-core-infrastructure.md) | Core Infrastructure | ✅ Done | 1 |
-| [03](docs/phases/03-transactions.md) | Transaction Management | ✅ Done | 2 |
+| [03](docs/phases/03-transactions.md) | Transaction Management + Sessions + PDF | ✅ Done | 3 |
 | [04](docs/phases/04-subscriptions.md) | Subscription Intelligence | ⬜ Not started | 1.5 |
 | [05](docs/phases/05-scenario-engine.md) | What-If Scenario Engine | ⬜ Not started | 1 |
 | [06](docs/phases/06-health-score.md) | Financial Health Score | ⬜ Not started | 1.5 |
@@ -18,14 +18,14 @@ Personal implementation roadmap. Tick off as you go.
 | [08](docs/phases/08-mcp-server.md) | MCP Server Wiring | ⬜ Not started | 1 |
 | [09](docs/phases/09-testing-and-quality.md) | Testing & Code Quality | ⬜ Not started | 1 |
 | [10](docs/phases/10-deployment.md) | Deployment | ⬜ Not started | 1 |
-| [11](docs/phases/11-multi-user.md) | Session-Based Identity & PDF Support | ⬜ Not started | 2.5 |
+| [11](docs/phases/11-multi-user.md) | Multi-User Support | ⬜ Not started | 2 |
 
 **Update the status column as you work:**
 - `⬜ Not started`
 - `🔄 In progress`
 - `✅ Done`
 
-**Total estimated build time: ~14.5 days** (solo developer, part-time evenings)
+**Total estimated build time: ~14 days** (solo developer, part-time evenings)
 
 ---
 
@@ -38,23 +38,10 @@ docker compose up -d
 
 # Terminal 2 — FastAPI server
 source .venv/bin/activate
-python main.py
+uvicorn "core.app:create_app" --factory --port 8000
 
 # Terminal 3 — Celery worker (needed for background jobs)
 celery -A core.celery_app.celery_app worker --loglevel=info
-
-# Terminal 4 — MCP server (for Claude Desktop)
-python -m mcp_server.server
-```
-
-### Run tests
-```bash
-pytest tests/ -v --cov=app --cov-fail-under=80
-```
-
-### Lint
-```bash
-ruff check .
 ```
 
 ### Create a migration
@@ -72,19 +59,24 @@ railway up
 
 ## API Endpoints Summary
 
-Once fully built, the API exposes:
+Live endpoints (phases 01–03 complete):
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| POST | `/api/v1/sessions/` | Create a named session |
+| POST | `/api/v1/sessions/` | Create a named session (e.g. "hdfc credit card") |
 | GET | `/api/v1/sessions/` | List all sessions |
-| DELETE | `/api/v1/sessions/{id}` | Delete a session and its data |
-| POST | `/api/v1/transactions/` | Create transaction |
+| DELETE | `/api/v1/sessions/{id}` | Delete a session and all its data |
+| POST | `/api/v1/transactions/?session_id=` | Create single transaction |
 | POST | `/api/v1/transactions/import-csv?session_id=` | Bulk import from CSV into session |
 | POST | `/api/v1/transactions/import-pdf?session_id=` | Bulk import from PDF into session |
-| GET | `/api/v1/transactions/spending` | Spending by category |
-| GET | `/api/v1/transactions/compare` | Compare two months |
+| GET | `/api/v1/transactions/spending?session_id=` | Spending by category |
+| GET | `/api/v1/transactions/compare?session_id=` | Compare two months |
+
+Planned endpoints (future phases):
+
+| Method | Path | Description |
+|--------|------|-------------|
 | POST | `/api/v1/subscriptions/detect` | Detect subscriptions from transactions |
 | GET | `/api/v1/subscriptions/` | List subscriptions with waste scores |
 | GET | `/api/v1/subscriptions/price-changes` | Subscriptions with price increases |
@@ -102,100 +94,64 @@ Swagger UI: `http://localhost:8000/docs`
 
 ## MCP Tools Summary
 
-| Tool | Phase | Description |
-|------|-------|-------------|
-| `get_spending` | 03 | Spending by category for a date range (session-scoped in phase 11) |
-| `compare_months` | 03 | Month-over-month spending comparison (session-scoped in phase 11) |
-| `audit_subscriptions` | 04 | List subscriptions with waste scores |
-| `flag_price_changes` | 04 | Detect subscription price increases |
-| `run_scenario` | 05 | What-if projection |
-| `get_health_score` | 06 | Weekly financial health score |
-| `set_goal` | 07 | Create a savings goal |
-| `get_goals` | 07 | List goals with progress |
-| `list_sessions` | 11 | List all named sessions available |
-| `import_transactions` | 11 | Import a local CSV or PDF into the active session |
+| Tool | Phase | Status | Description |
+|------|-------|--------|-------------|
+| `list_sessions` | 03 | ✅ Live | List all named sessions / accounts |
+| `import_file` | 03 | ✅ Live | Import CSV or PDF into a named session |
+| `get_spending` | 03 | ✅ Live | Spending by category for a date range; optional session_name |
+| `compare_months` | 03 | ✅ Live | Month-over-month comparison; optional session_name |
+| `audit_subscriptions` | 04 | ⬜ | List subscriptions with waste scores |
+| `flag_price_changes` | 04 | ⬜ | Detect subscription price increases |
+| `run_scenario` | 05 | ⬜ | What-if projection |
+| `get_health_score` | 06 | ⬜ | Weekly financial health score |
+| `set_goal` | 07 | ⬜ | Create a savings goal |
+| `get_goals` | 07 | ⬜ | List goals with progress |
+
+**Session behaviour:** all tools accept an optional `session_name` parameter. If omitted, they query the session named in `FINSIGHT_SESSION` env var (default: `"default"`). Querying from Claude Desktop — just mention the account name naturally and Claude passes it through.
 
 ---
 
-## Directory Structure (final)
+## Directory Structure (current)
 
 ```
 personal-finance-ai-agent/
-├── api/                        # FastAPI route handlers (thin layer — validate + route only)
+├── api/
 │   ├── health.py
-│   ├── transactions.py
-│   ├── subscriptions.py
-│   ├── scenarios.py
-│   ├── health_score.py
-│   ├── budgets.py
-│   └── goals.py
+│   ├── sessions.py              # Session CRUD
+│   └── transactions.py          # CSV + PDF import, spending, compare
 ├── app/
-│   ├── models/                 # SQLAlchemy ORM models
-│   │   ├── __init__.py         # Import all models here (Alembic needs this)
-│   │   ├── transaction.py
-│   │   ├── subscription.py
-│   │   ├── health_score.py
-│   │   ├── budget.py
-│   │   └── goal.py
-│   ├── schemas/                # Pydantic request/response schemas
-│   │   ├── transaction.py
-│   │   ├── subscription.py
-│   │   ├── scenario.py
-│   │   ├── health_score.py
-│   │   ├── budget.py
-│   │   └── goal.py
-│   └── services/               # Business logic — all orchestration lives here
+│   ├── models/
+│   │   ├── session.py           # Session ORM
+│   │   └── transaction.py       # Transaction ORM (has session_id FK)
+│   ├── schemas/
+│   │   ├── session.py
+│   │   └── transaction.py
+│   └── services/
+│       ├── session_service.py   # create, list, get_or_create_by_name, delete
 │       ├── transaction_service.py
-│       ├── categorizer.py
-│       ├── subscription_service.py
-│       ├── scenario_service.py
-│       ├── health_score_service.py
-│       ├── budget_service.py
-│       └── goal_service.py
+│       ├── categorizer.py       # Claude API + keyword fallback
+│       └── pdf_parser.py        # pdfplumber + Claude API + regex fallback
 ├── mcp_server/
-│   ├── server.py               # MCP server entry point
+│   ├── server.py
 │   └── tools/
-│       ├── transactions.py
-│       ├── subscriptions.py
-│       ├── scenarios.py
-│       ├── health_score.py
-│       └── goals.py
+│       └── transactions.py      # list_sessions, import_file, get_spending, compare_months
 ├── core/
-│   ├── config.py               # Settings (pydantic-settings, reads .env)
-│   ├── database.py             # Engine, session factory, Base, get_db()
-│   ├── app.py                  # FastAPI app factory + router registration
-│   └── celery_app.py           # Celery app + beat schedule
+│   ├── config.py                # includes FINSIGHT_SESSION setting
+│   ├── database.py
+│   ├── app.py
+│   └── celery_app.py
 ├── celery_tasks/
-│   └── health_score.py         # Weekly health score Celery task
-├── migrations/                 # Alembic migration files (auto-generated)
-├── tests/
-│   ├── conftest.py             # pytest fixtures (engine, db_session, client)
-│   ├── test_transaction_service.py
-│   ├── test_subscription_service.py
-│   ├── test_scenario_service.py
-│   ├── test_health_score_service.py
-│   ├── test_budget_service.py
-│   ├── test_api_transactions.py
-│   └── test_api_budgets.py
-├── docs/
-│   ├── phases/                 # Phase-by-phase build guide (this repo)
-│   └── architecture-decisions.md
+│   └── health_score.py
+├── migrations/versions/         # 4 migrations applied
 ├── scripts/
-│   └── start_mcp.sh
-├── .github/workflows/ci.yml    # GitHub Actions CI
+│   └── generate_dummy_pdfs.py   # generates hdfc_january/february_2025.pdf
+├── sample_transactions.csv
+├── hdfc_january_2025.pdf
+├── hdfc_february_2025.pdf
 ├── docker-compose.yml
-├── Dockerfile
-├── pyproject.toml              # Ruff config + pytest config
-├── requirements.in             # Direct dependencies
-├── requirements.txt            # Pinned (generated by pip-compile)
-├── requirements_dev.in
-├── requirements_dev.txt
-├── .env                        # Local secrets (gitignored)
-├── .env.example                # Template (committed)
-├── .gitignore
-├── BUILD_PLAN.md               # This file
-├── CLAUDE.md                   # Project context for Claude Code sessions
-└── main.py                     # Uvicorn entrypoint
+├── requirements.in
+├── .env
+└── BUILD_PLAN.md
 ```
 
 ---
@@ -213,10 +169,8 @@ personal-finance-ai-agent/
 
 ## Key Docs
 
-- [Architecture Decisions](docs/architecture-decisions.md) — why every major technical choice was made
-- [Phase 01: Setup](docs/phases/01-environment-setup.md)
-- [Phase 02: Infrastructure](docs/phases/02-core-infrastructure.md)
-- [Phase 03: Transactions](docs/phases/03-transactions.md)
+- [Architecture Decisions](docs/architecture-decisions.md)
+- [Phase 03: Transactions + Sessions + PDF](docs/phases/03-transactions.md)
 - [Phase 04: Subscriptions](docs/phases/04-subscriptions.md)
 - [Phase 05: Scenarios](docs/phases/05-scenario-engine.md)
 - [Phase 06: Health Score](docs/phases/06-health-score.md)
