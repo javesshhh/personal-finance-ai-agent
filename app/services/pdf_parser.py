@@ -22,7 +22,7 @@ _AMOUNT_PATTERN = re.compile(r"[\d,]+\.\d{2}")
 
 def _normalize_date(raw: str) -> date | None:
     """Try several common date formats and return a date or None."""
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d-%m-%y", "%d/%m/%y"):
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d-%m-%y", "%d/%m/%y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%d-%b-%Y", "%d/%b/%Y"):
         try:
             from datetime import datetime
             return datetime.strptime(raw, fmt).date()
