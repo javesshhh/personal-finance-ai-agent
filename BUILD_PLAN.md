@@ -18,14 +18,14 @@ Personal implementation roadmap. Tick off as you go.
 | [08](docs/phases/08-mcp-server.md) | MCP Server Wiring | ⬜ Not started | 1 |
 | [09](docs/phases/09-testing-and-quality.md) | Testing & Code Quality | ⬜ Not started | 1 |
 | [10](docs/phases/10-deployment.md) | Deployment | ⬜ Not started | 1 |
-| [11](docs/phases/11-multi-user.md) | Multi-User Support | ⬜ Not started | 2 |
+| [11](docs/phases/11-multi-user.md) | Session-Based Identity & PDF Support | ⬜ Not started | 2.5 |
 
 **Update the status column as you work:**
 - `⬜ Not started`
 - `🔄 In progress`
 - `✅ Done`
 
-**Total estimated build time: ~14 days** (solo developer, part-time evenings)
+**Total estimated build time: ~14.5 days** (solo developer, part-time evenings)
 
 ---
 
@@ -77,8 +77,12 @@ Once fully built, the API exposes:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
+| POST | `/api/v1/sessions/` | Create a named session |
+| GET | `/api/v1/sessions/` | List all sessions |
+| DELETE | `/api/v1/sessions/{id}` | Delete a session and its data |
 | POST | `/api/v1/transactions/` | Create transaction |
-| POST | `/api/v1/transactions/import-csv` | Bulk import from CSV |
+| POST | `/api/v1/transactions/import-csv?session_id=` | Bulk import from CSV into session |
+| POST | `/api/v1/transactions/import-pdf?session_id=` | Bulk import from PDF into session |
 | GET | `/api/v1/transactions/spending` | Spending by category |
 | GET | `/api/v1/transactions/compare` | Compare two months |
 | POST | `/api/v1/subscriptions/detect` | Detect subscriptions from transactions |
@@ -100,14 +104,16 @@ Swagger UI: `http://localhost:8000/docs`
 
 | Tool | Phase | Description |
 |------|-------|-------------|
-| `get_spending` | 03 | Spending by category for a date range |
-| `compare_months` | 03 | Month-over-month spending comparison |
+| `get_spending` | 03 | Spending by category for a date range (session-scoped in phase 11) |
+| `compare_months` | 03 | Month-over-month spending comparison (session-scoped in phase 11) |
 | `audit_subscriptions` | 04 | List subscriptions with waste scores |
 | `flag_price_changes` | 04 | Detect subscription price increases |
 | `run_scenario` | 05 | What-if projection |
 | `get_health_score` | 06 | Weekly financial health score |
 | `set_goal` | 07 | Create a savings goal |
 | `get_goals` | 07 | List goals with progress |
+| `list_sessions` | 11 | List all named sessions available |
+| `import_transactions` | 11 | Import a local CSV or PDF into the active session |
 
 ---
 

@@ -1,70 +1,73 @@
-# Phase 11 — Multi-User Support
+# Phase 11 — Session-Based Identity & PDF Support
 
-Add user identity, authentication, and data isolation so multiple people can use the same FinSight deployment with their own private data.
-
----
-
-## Why this is a separate phase
-
-All earlier phases build features assuming one global user. Adding multi-user touches the database schema, every service query, every API endpoint, and the MCP layer. Doing it last means the feature set is proven before introducing auth complexity.
+Replace the single-user global data model with named sessions, and add PDF bank statement parsing alongside CSV import.
 
 ---
 
-## What changes
+## Why sessions instead of full auth
 
-### 1. User model & registration
+Full JWT auth (users table, passwords, tokens) is the right call for a product with multiple real users. For a personal finance tool used by one or a few people from Claude Desktop, sessions are simpler and equally effective:
 
-New `users` table:
+- No passwords to manage
+- No token expiry to handle in MCP tools
+- Session name is human-readable and self-documenting ("Javesh 2025", "Joint Account")
+- Each person sets their session name in their own Claude Desktop config — zero friction
 
+---
+
+## Part A — Session-Based Identity
+
+### 1. Sessions table
+
+```sql
+sessions
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid()
+  name        TEXT UNIQUE NOT NULL     -- "Javesh 2025", "Joint Account"
+  created_at  TIMESTAMP DEFAULT now()
 ```
-users
-  id          UUID (PK)
-  email       TEXT UNIQUE NOT NULL
-  name        TEXT
-  password    TEXT (bcrypt hash)
-  created_at  TIMESTAMP
-```
 
-New endpoints:
-- `POST /api/v1/auth/register` — create account
-- `POST /api/v1/auth/login` — returns JWT access token
-- `GET /api/v1/auth/me` — current user info
+### 2. Foreign key on all owned tables
 
-**Library:** `python-jose` for JWT, `passlib[bcrypt]` for password hashing.
-
----
-
-### 2. Foreign keys on all user-owned tables
-
-Every table gets a `user_id UUID NOT NULL REFERENCES users(id)` column:
+Add `session_id UUID NOT NULL REFERENCES sessions(id)` to:
 
 | Table | Change |
 |-------|--------|
-| `transactions` | Add `user_id` |
-| `subscriptions` | Add `user_id` |
-| `health_scores` | Add `user_id` |
-| `budgets` | Add `user_id` |
-| `goals` | Add `user_id` |
+| `transactions` | Add `session_id` |
+| `subscriptions` | Add `session_id` |
+| `health_scores` | Add `session_id` |
+| `budgets` | Add `session_id` |
+| `goals` | Add `session_id` |
 
-Generate one Alembic migration covering all tables at once.
+One Alembic migration covers all tables.
 
----
+**Migration strategy for existing data:** existing rows get assigned to a default session called `"default"` created during the migration. No data is lost.
 
-### 3. Auth dependency
+### 3. Session API endpoints
 
-```python
-# core/auth.py
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
-    ...
+```
+POST   /api/v1/sessions/           — create a session (body: {"name": "Javesh 2025"})
+GET    /api/v1/sessions/           — list all sessions (id + name + created_at)
+DELETE /api/v1/sessions/{id}       — delete a session and all its data
 ```
 
-Every protected router injects `current_user: User = Depends(get_current_user)`.
+### 4. Session selection on document upload
 
----
+When importing a file (CSV or PDF), the request must include a `session_id`:
 
-### 4. Filter every query by user_id
+```
+POST /api/v1/transactions/import-csv?session_id=<uuid>
+POST /api/v1/transactions/import-pdf?session_id=<uuid>
+```
 
-Every service function gets a `user_id: UUID` parameter added. All `SELECT`, `INSERT`, and `UPDATE` statements gain a `.where(Model.user_id == user_id)` clause.
+**The upload flow from a client perspective:**
+1. Call `GET /api/v1/sessions/` → get list of sessions
+2. Show list + "New session" option
+3. If "New session" → call `POST /api/v1/sessions/` with chosen name → get back `session_id`
+4. Upload file with that `session_id`
+
+### 5. Session scoping in all service functions
+
+Every service function gains a `session_id: UUID` parameter. All queries gain `.where(Model.session_id == session_id)`.
 
 Files to update:
 - `app/services/transaction_service.py`
@@ -74,100 +77,160 @@ Files to update:
 - `app/services/budget_service.py`
 - `app/services/goal_service.py`
 
----
+### 6. MCP tools — session identity via env var
 
-### 5. MCP server — user identity
-
-The MCP server currently connects as a nameless caller. With multi-user, it needs to know whose data to query.
-
-**Approach:** Add a `user_email` config field to `claude_desktop_config.json`. On startup, the MCP server looks up (or creates) the user by email and scopes all tool calls to that `user_id`.
+The MCP server is launched by Claude Desktop as a subprocess. Each user sets their session name in `claude_desktop_config.json`:
 
 ```json
 "env": {
-  "FINSIGHT_USER_EMAIL": "you@example.com",
+  "FINSIGHT_SESSION": "Javesh 2025",
   ...
 }
 ```
 
-Each person who connects Claude Desktop sets their own email in the config — their MCP tools only see their own data.
+On startup, the MCP server resolves the session name to a `session_id` (creating the session if it doesn't exist yet). All tool calls use this `session_id` internally — the user never has to pass it in queries.
+
+### 7. Updated MCP tool signatures
+
+All existing and future tools get session context injected automatically at the server level — callers (Claude Desktop) don't need to pass session name explicitly:
+
+| Tool | Change |
+|------|--------|
+| `get_spending(start_date, end_date)` | session resolved from env at startup, no change to signature |
+| `compare_months(year_a, month_a, year_b, month_b)` | same |
+| `audit_subscriptions()` | same |
+| `flag_price_changes()` | same |
+| `run_scenario(...)` | same |
+| `get_health_score()` | same |
+| `set_goal(...)` | same |
+| `get_goals()` | same |
+
+New tools added in this phase:
+
+| Tool | Description |
+|------|-------------|
+| `list_sessions()` | Returns all session names — useful when user wants to switch context |
+| `import_transactions(file_path)` | Import a local CSV or PDF by file path, into the active session |
 
 ---
 
-### 6. Token-based auth for the REST API
+## Part B — PDF Bank Statement Parsing
 
-All existing endpoints gain auth:
+### How PDF parsing works
 
-```python
-@router.get("/spending")
-async def get_spending(
-    ...,
-    current_user: User = Depends(get_current_user),
-):
-    return await transaction_service.get_spending_by_category(db, current_user.id, ...)
+Bank statement PDFs come in two forms:
+
+1. **Tabular PDFs** (most modern bank statements) — rows and columns are structured. `pdfplumber` extracts them reliably.
+2. **Text-dump PDFs** (scanned or older formats) — unstructured text. Claude API parses these by reading the raw text and extracting transaction rows.
+
+### Pipeline
+
+```
+PDF uploaded
+    ↓
+pdfplumber extracts text/tables from each page
+    ↓
+Does it look tabular? (has rows with date + amount patterns)
+    ↓ yes                          ↓ no
+Parse table rows directly     Send text to Claude API:
+into transactions             "Extract transactions as JSON"
+    ↓                              ↓
+Normalize into TransactionCreate list
+    ↓
+Run through existing import_csv deduplication + categorization pipeline
+    ↓
+Return CSVImportResult
 ```
 
-Public routes (no auth needed): `GET /health`, `POST /auth/register`, `POST /auth/login`.
+### New endpoint
+
+```
+POST /api/v1/transactions/import-pdf?session_id=<uuid>
+Content-Type: multipart/form-data
+file: <pdf file>
+```
+
+Returns the same `CSVImportResult` schema as CSV import.
+
+### New service function
+
+```python
+# app/services/pdf_parser.py
+async def parse_pdf(pdf_content: bytes) -> list[TransactionCreate]:
+    ...
+```
+
+Internally tries tabular extraction first, falls back to Claude API text parsing.
+
+### Library
+
+`pdfplumber` — pure Python, no system dependencies, handles both text and table extraction cleanly. Add to `requirements.in`.
+
+### Claude API prompt for unstructured PDFs
+
+```
+Given the following bank statement text, extract all transactions.
+Return a JSON array where each item has: date (YYYY-MM-DD), description (string), amount (positive number).
+Ignore headers, footers, account summaries, and running balances.
+```
+
+If Claude API is unavailable (no credits), fall back to regex-based date+amount detection — catches most tabular formats.
 
 ---
 
 ## Step-by-step checklist
 
-- [ ] Add `python-jose[cryptography]` and `passlib[bcrypt]` to `requirements.in`, run `pip-compile`
-- [ ] Create `app/models/user.py` — User ORM model
-- [ ] Create Alembic migration: add `users` table + `user_id` FK to all tables
+### Session infrastructure
+- [ ] Add `pdfplumber` to `requirements.in`, run `pip-compile`
+- [ ] Create `app/models/session.py` — Session ORM model
+- [ ] Create Alembic migration: add `sessions` table, add `session_id` FK to all tables, backfill with default session
 - [ ] Run `alembic upgrade head`
-- [ ] Create `core/auth.py` — JWT encode/decode, `get_current_user` dependency
-- [ ] Create `app/services/user_service.py` — register, login, get_by_email
-- [ ] Create `app/schemas/user.py` — UserCreate, UserRead, TokenResponse
-- [ ] Create `api/auth.py` — register + login + me endpoints
-- [ ] Register auth router in `core/app.py`
-- [ ] Update all service functions to accept and filter by `user_id`
-- [ ] Update all API endpoints to inject `current_user` and pass `user_id` to services
-- [ ] Update MCP tools — resolve user from `FINSIGHT_USER_EMAIL` env var at startup
-- [ ] Update `claude_desktop_config.json` to include `FINSIGHT_USER_EMAIL`
-- [ ] Manual test: register two users, import different CSVs, verify data isolation
-- [ ] Update `README.md` with new auth endpoints
+- [ ] Create `app/schemas/session.py` — SessionCreate, SessionRead
+- [ ] Create `app/services/session_service.py` — create, list, delete, get_or_create_by_name
+- [ ] Create `api/sessions.py` — session endpoints
+- [ ] Register sessions router in `core/app.py`
+- [ ] Update all service functions to accept `session_id: UUID`
+- [ ] Update all API endpoints to require and pass `session_id`
+- [ ] Add `FINSIGHT_SESSION` to `core/config.py` settings
+- [ ] Update `mcp_server/server.py` to resolve session on startup
+- [ ] Update all MCP tools to use the session-scoped session_id
+- [ ] Add `list_sessions` and `import_transactions` MCP tools
 
----
-
-## Database migration strategy
-
-The tricky part: `user_id` is NOT NULL but existing rows have no user. Two options:
-
-**Option A (clean slate):** Drop all data, add `NOT NULL` column directly.
-```bash
-# Wipe dev data
-alembic downgrade base
-alembic upgrade head
-```
-
-**Option B (preserve data):** Add column as nullable → backfill with a default user → add NOT NULL constraint.
-```sql
-ALTER TABLE transactions ADD COLUMN user_id UUID REFERENCES users(id);
--- insert a default user, update all rows
-ALTER TABLE transactions ALTER COLUMN user_id SET NOT NULL;
-```
-
-For a development/demo project, Option A is simpler. For production with real user data, use Option B.
-
----
-
-## Security notes
-
-- Passwords must be bcrypt-hashed — never store plaintext
-- JWT secret must be in `.env` as `JWT_SECRET` — never hardcoded
-- JWT expiry: 7 days for personal use, 15 minutes + refresh token for production
-- All endpoints must return 401 (not 403 or 404) for missing/invalid tokens so clients can re-authenticate
+### PDF support
+- [ ] Create `app/services/pdf_parser.py` — tabular + Claude API fallback extraction
+- [ ] Create `api/pdf_import.py` or add `import-pdf` route to `api/transactions.py`
+- [ ] Manual test: upload a real bank statement PDF, verify transactions extracted correctly
+- [ ] Test deduplication works across mixed CSV + PDF imports for same period
 
 ---
 
 ## New files
 
 ```
-api/auth.py
-app/models/user.py
-app/schemas/user.py
-app/services/user_service.py
-core/auth.py
-migrations/versions/XXXX_add_multi_user.py
+app/models/session.py
+app/schemas/session.py
+app/services/session_service.py
+app/services/pdf_parser.py
+api/sessions.py
+migrations/versions/XXXX_add_sessions.py
+```
+
+## Files updated
+
+```
+core/config.py                  — FINSIGHT_SESSION setting
+core/app.py                     — register sessions router
+api/transactions.py             — session_id param on import endpoints
+mcp_server/server.py            — resolve session on startup
+mcp_server/tools/transactions.py — use session_id
+mcp_server/tools/subscriptions.py
+mcp_server/tools/scenarios.py
+mcp_server/tools/health_score.py
+mcp_server/tools/goals.py
+app/services/*.py               — all service functions gain session_id param
+app/models/transaction.py       — add session_id FK
+app/models/subscription.py      — add session_id FK
+app/models/health_score.py      — add session_id FK
+app/models/budget.py            — add session_id FK
+app/models/goal.py              — add session_id FK
 ```
