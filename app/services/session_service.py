@@ -60,17 +60,33 @@ async def get_session(db: AsyncSession, session_id: uuid.UUID) -> Session | None
 async def get_or_create_by_name(db: AsyncSession, name: str) -> Session:
     """Fetch a session by name, creating it if it does not exist.
 
+    Matching is case-insensitive. If no exact match is found, falls back to
+    a partial match (the stored name contains the given name or vice versa).
+    Only creates a new session when no existing session matches at all.
+
     Args:
         db: Async database session.
-        name: Session name.
+        name: Session name (exact, case-insensitive, or partial).
 
     Returns:
         Existing or newly created Session.
     """
-    result = await db.execute(select(Session).where(Session.name == name))
+    from sqlalchemy import func as sqlfunc
+
+    # 1. Case-insensitive exact match
+    result = await db.execute(select(Session).where(sqlfunc.lower(Session.name) == name.lower()))
     session = result.scalar_one_or_none()
     if session:
         return session
+
+    # 2. Partial match — stored name contains the query or query contains stored name
+    all_sessions = (await db.execute(select(Session))).scalars().all()
+    name_lower = name.lower()
+    for s in all_sessions:
+        if name_lower in s.name.lower() or s.name.lower() in name_lower:
+            return s
+
+    # 3. No match — create new session with the given name
     session = Session(name=name)
     db.add(session)
     await db.commit()
