@@ -8,7 +8,8 @@ from anthropic import AsyncAnthropic, BadRequestError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.scenario import ScenarioRequest, ScenarioResult
-from app.services.transaction_service import get_spending_by_category
+from app.services import session_service
+from app.services.transaction_service import detect_inter_session_transfers, get_spending_by_category
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,15 @@ async def run_scenario(
     """
     today = date.today()
     three_months_ago = today - timedelta(days=90)
-    spending = await get_spending_by_category(db, session_id, three_months_ago, today)
+
+    if session_id is None:
+        # Cross-session: deduplicate bill payments to avoid counting credit card
+        # payments in one session AND the individual card transactions in another.
+        sessions = await session_service.list_sessions(db)
+        exclude_ids, _ = await detect_inter_session_transfers(db, sessions, three_months_ago, today)
+        spending = await get_spending_by_category(db, None, three_months_ago, today, exclude_ids)
+    else:
+        spending = await get_spending_by_category(db, session_id, three_months_ago, today)
 
     # Monthly averages over the 3-month window
     monthly_avg: dict[str, Decimal] = {s.category.value: s.total / 3 for s in spending}

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.transaction import Transaction, TransactionCategory
 from app.schemas.transaction import CSVImportResult, MonthComparison, SpendingByCategory, TransactionCreate
 from app.services.categorizer import categorize_transactions
+from app.utils.cross_session import find_inter_session_transfer_ids
 
 
 async def create_transaction(db: AsyncSession, session_id: uuid.UUID, data: TransactionCreate) -> Transaction:
@@ -130,6 +131,7 @@ async def get_spending_by_category(
     session_id: uuid.UUID | None,
     start_date: date,
     end_date: date,
+    exclude_ids: frozenset[int] = frozenset(),
 ) -> list[SpendingByCategory]:
     """Aggregate spending by category within a date range.
 
@@ -138,6 +140,7 @@ async def get_spending_by_category(
         session_id: UUID of the session to query, or None to aggregate across all sessions.
         start_date: Inclusive start date.
         end_date: Inclusive end date.
+        exclude_ids: Transaction IDs to omit from the aggregation (e.g., inter-session transfers).
 
     Returns:
         List of SpendingByCategory sorted by total spend descending.
@@ -149,6 +152,8 @@ async def get_spending_by_category(
     ]
     if session_id is not None:
         filters.append(Transaction.session_id == session_id)
+    if exclude_ids:
+        filters.append(Transaction.id.not_in(list(exclude_ids)))
 
     result = await db.execute(
         select(
@@ -164,6 +169,48 @@ async def get_spending_by_category(
         SpendingByCategory(category=row.category, total=abs(row.total), count=row.count)
         for row in result.all()
     ]
+
+
+async def detect_inter_session_transfers(
+    db: AsyncSession,
+    sessions: list,
+    start_date: date,
+    end_date: date,
+) -> tuple[frozenset[int], list[str]]:
+    """Detect transactions that are payments from one session to another.
+
+    Used before cross-session aggregation to prevent double-counting.
+    For example: "HDFC Credit Card Bill ₹15,000" in a savings session should not
+    be counted when the individual HDFC card transactions are already in another session.
+
+    Detection uses two signals: session-name word overlap + payment keyword in description.
+
+    Args:
+        db: Async database session.
+        sessions: All Session ORM instances (from session_service.list_sessions).
+        start_date: Start of the date window to scan.
+        end_date: End of the date window to scan.
+
+    Returns:
+        Tuple of (frozenset of transaction IDs to exclude, list of excluded descriptions).
+    """
+    if len(sessions) <= 1:
+        return frozenset(), []
+
+    session_id_to_name = {s.id: s.name for s in sessions}
+
+    result = await db.execute(
+        select(Transaction).where(
+            Transaction.date >= start_date,
+            Transaction.date <= end_date,
+        )
+    )
+    transactions = result.scalars().all()
+
+    exclude_ids = find_inter_session_transfer_ids(transactions, session_id_to_name)
+    excluded_descriptions = [t.description for t in transactions if t.id in exclude_ids]
+
+    return exclude_ids, excluded_descriptions
 
 
 async def compare_months(

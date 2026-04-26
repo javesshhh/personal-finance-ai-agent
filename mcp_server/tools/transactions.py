@@ -22,6 +22,26 @@ async def _resolve_session(session_name: str) -> uuid.UUID:
         return session.id
 
 
+async def _cross_session_spending(
+    start_date: date,
+    end_date: date,
+) -> tuple[list, list[str]]:
+    """Aggregate spending across all sessions, excluding inter-session transfers.
+
+    Returns:
+        Tuple of (spending list, list of excluded transfer descriptions).
+    """
+    async with AsyncSessionLocal() as db:
+        sessions = await session_service.list_sessions(db)
+        exclude_ids, excluded_descs = await transaction_service.detect_inter_session_transfers(
+            db, sessions, start_date, end_date
+        )
+        results = await transaction_service.get_spending_by_category(
+            db, None, start_date, end_date, exclude_ids
+        )
+    return results, excluded_descs
+
+
 def register_transaction_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
@@ -112,24 +132,37 @@ def register_transaction_tools(mcp: FastMCP) -> None:
     async def get_spending(start_date: str, end_date: str, session_name: str = "") -> str:
         """Get spending totals by category between two dates.
 
+        When session_name is empty, aggregates across ALL sessions and automatically
+        excludes inter-session transfers (e.g., credit card bill payments) to avoid
+        double-counting money that appears in both a savings account and a card account.
+
         Args:
             start_date: Start date in YYYY-MM-DD format.
             end_date: End date in YYYY-MM-DD format.
             session_name: Which session to query (e.g. "hdfc credit card").
-                          Leave empty to use the default session.
+                          Leave empty to see total spending across all accounts.
         """
-        sid = await _resolve_session(session_name)
-        async with AsyncSessionLocal() as db:
-            results = await transaction_service.get_spending_by_category(
-                db, sid,
-                date.fromisoformat(start_date),
-                date.fromisoformat(end_date),
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+
+        if session_name.strip():
+            sid = await _resolve_session(session_name)
+            async with AsyncSessionLocal() as db:
+                results = await transaction_service.get_spending_by_category(db, sid, start, end)
+            label = f" [{session_name.strip()}]"
+            note = ""
+        else:
+            results, excluded = await _cross_session_spending(start, end)
+            label = " [all accounts]"
+            note = (
+                f"\n(Excluded {len(excluded)} inter-session transfer(s) to avoid double-counting)"
+                if excluded else ""
             )
-        label = f" [{session_name.strip()}]" if session_name.strip() else ""
+
         if not results:
             return f"No spending data found{label} for that date range."
         lines = [f"{r.category.value}: ₹{r.total:,.2f} ({r.count} transactions)" for r in results]
-        return f"Spending{label}:\n" + "\n".join(lines)
+        return f"Spending{label}:\n" + "\n".join(lines) + note
 
     @mcp.tool()
     async def compare_months(

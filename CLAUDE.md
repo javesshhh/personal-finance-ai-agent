@@ -195,9 +195,10 @@ These features are fully live — do NOT re-implement them:
 
 **Phase 05 (What-If Scenario Engine):**
 - **Scenario service** — `scenario_service.run_scenario(db, session_id, request)` — uses last 3 months of real spending as baseline, applies spending cuts, projects months to goal via Claude narrative + deterministic fallback.
-- **API:** `POST /api/v1/scenarios/run?session_id=`.
+- **API:** `POST /api/v1/scenarios/run?session_id=` (session_id optional; omit for cross-session).
 - **MCP tool:** `run_scenario(category, reduction_pct, target_description, target_amount, extra_monthly_savings=0, session_name="")`.
 - **Fallback** — `_deterministic_projection` runs when Claude API is unavailable.
+- **Cross-session deduplication** — `app/utils/cross_session.py` detects inter-session transfers (e.g., "HDFC Credit Card Bill" in savings session) using session-name word overlap + payment keywords, and excludes them from cross-session aggregations. Applied automatically in `run_scenario` and `get_spending` when no session is specified. `get_spending_by_category` accepts `exclude_ids: frozenset[int]` parameter.
 
 ### Key data model note
 

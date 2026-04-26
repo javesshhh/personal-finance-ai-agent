@@ -82,6 +82,21 @@ At that pace you would reach your MacBook Pro goal in roughly 10 months.
 
 ---
 
+## Cross-Session Deduplication
+
+When `session_name=""` (all accounts), the engine automatically excludes inter-session transfer transactions to prevent double-counting.
+
+**Example:** If "sbi savings" has `"HDFC Credit Card Bill ₹15,000"` and "hdfc credit card" has individual transactions totalling ₹15,000, only the card transactions are counted — not both.
+
+**Detection logic** (`app/utils/cross_session.py`):
+- Two signals must both fire: (1) the description word-overlaps with another session's name, AND (2) contains a payment/bill/transfer keyword
+- ATM withdrawals, purchases, and income entries are never flagged even if they share the bank name
+- `get_spending_by_category` accepts `exclude_ids: frozenset[int]` to apply the exclusion at the SQL level
+
+**Same deduplication applies to:** `get_spending` MCP tool (cross-session), scenario baseline.
+
+---
+
 ## Registration
 - `core/app.py` — `scenarios_router` registered at `/api/v1`
 - `mcp_server/server.py` — `register_scenario_tools(mcp)` called at startup

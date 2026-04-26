@@ -138,7 +138,9 @@ personal-finance-ai-agent/
 │       ├── scenario_service.py  # run_scenario + _deterministic_projection fallback
 │       ├── session_service.py   # create, list, get_or_create_by_name (fuzzy), delete
 │       ├── subscription_service.py  # detect, score waste, list, price changes
-│       └── transaction_service.py
+│       └── transaction_service.py   # import, spending, compare, cross-session dedup
+│   └── utils/
+│       └── cross_session.py     # inter-session transfer detection (avoids double-counting)
 ├── mcp_server/
 │   ├── server.py
 │   └── tools/
