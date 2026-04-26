@@ -32,7 +32,7 @@ def register_transaction_tools(mcp: FastMCP) -> None:
             sessions = await session_service.list_sessions(db)
         if not sessions:
             return "No sessions found. Use import_file to create one."
-        lines = [f"- {s.name}" for s in sessions]
+        lines = [f"- {s.name} (created {s.created_at.strftime('%d %b %Y, %I:%M %p')})" for s in sessions]
         return "Available sessions:\n" + "\n".join(lines)
 
     @mcp.tool()
